@@ -8,17 +8,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.log4j.Logger;
+import javax.sql.DataSource;
 
+import org.apache.log4j.Logger;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
 import org.springframework.jdbc.support.rowset.SqlRowSetMetaData;
 import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.RequestParam;
 
+import com.biz.configuration.ConnectionProperty;
+import com.biz.exception.DataTypeLengthFormatException;
 import com.biz.model.Fields;
 import com.biz.model.FieldsModified;
 import com.biz.model.Table;
+import com.biz.model.TableChangeInfo;
+import com.biz.model.TableData;
 import com.biz.model.TableDetails;
 import com.biz.model.TableFieldsInfo;
+import com.biz.util.Constraints;
+import com.biz.util.ConstraintsAddDropUtil;
+import com.biz.util.DataTypeUtil;
+import com.biz.util.UserMapper;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -29,14 +40,50 @@ import com.google.gson.JsonParser;
 
 @Component
 public class TableUtil {
-	
-	
+
 	private static final Logger logger = Logger.getLogger(TableUtil.class);
 
-	protected Map<String, String> creatTable(String table) {
+	protected Map<String, String> getDatabaseAndUserTableName(String domainName, JdbcTemplate sql,
+			ConnectionProperty connProp) {
 
-		// String dbName = "springbootdb";
-		String dbName = "muleesb";
+		String columnInfoQuery = "SELECT TABLESPACE,USERMASTER FROM " + connProp.getMasterDatabaseName() + "."
+				+ connProp.getMasterTableName() + " WHERE NAME = '" + domainName + "'";
+		SqlRowSet rowSet = sql.queryForRowSet(columnInfoQuery);
+		Map<String, String> data = new HashMap<>();
+		while (rowSet.next()) {
+			data.put("TABLESPACE", rowSet.getString(1));
+			data.put("USERMASTER", rowSet.getString(2));
+		}
+		return data;
+	}
+
+	protected String getDatabaseName(String domainName, JdbcTemplate sql, ConnectionProperty connProp) {
+
+		String columnInfoQuery = "SELECT TABLESPACE FROM " + connProp.getMasterDatabaseName() + "."
+				+ connProp.getMasterTableName() + " WHERE NAME = '" + domainName + "'";
+		SqlRowSet rowSet = sql.queryForRowSet(columnInfoQuery);
+		String data = null;
+		while (rowSet.next()) {
+			data = rowSet.getString(1);
+		}
+		return data;
+	}
+
+	public Map<String, String> checkUserExists(String userName, String password, Map<String, String> domainandUserName,
+			JdbcTemplate jdbcTemplate) {
+
+		String dbName = domainandUserName.get("TABLESPACE");
+		String tableName = domainandUserName.get("USERMASTER");
+		String query = "select * from " + dbName + "." + tableName + " where username='" + userName + "' and password='"
+				+ password + "'";
+
+		List<Map<String, String>> users = jdbcTemplate.query(query, new UserMapper());
+		return users.size() > 0 ? users.get(0) : null;
+
+	}
+
+	protected Map<String, String> creatTable(String table, String dbName) {
+
 		Gson gson = new Gson();
 		Table t = gson.fromJson(table, Table.class);
 		JsonParser jsonParser = new JsonParser();
@@ -49,7 +96,8 @@ public class TableUtil {
 		List<Fields> fieldsList = tableFieldsInfo.getFields();
 
 		String tableName = dbName + "." + tableDetails.getTableName().trim();
-		String tableDescription = tableDetails.getTableDescription();
+
+		String tableDescription = tableDetails.getTableDescription()!=null?tableDetails.getTableDescription().toString():"";
 
 		Map<String, String> mapResult = createColumns(fieldsList);
 		String indexesArray = mapResult.get("indexes");
@@ -70,7 +118,7 @@ public class TableUtil {
 
 		String query = "CREATE TABLE IF NOT EXISTS " + tableName + "(" + partialQuery + ") COMMENT '" + tableDescription
 				+ "'";
-
+        logger.info("Table Create Query:"+query);
 		mapResult.put("Query", query);
 		mapResult.put("indexes", indexListAsString);
 		return mapResult;
@@ -84,16 +132,18 @@ public class TableUtil {
 		List<Fields> fieldsList = new ArrayList<>();
 		Gson gson = new GsonBuilder().serializeNulls().create();
 		while (rowset.next()) {
-
 			String fieldName = rowset.getString("COLUMN_NAME");
 			String type = rowset.getString("DATA_TYPE").toUpperCase();
 
 			String columnType = rowset.getString("COLUMN_TYPE");
+			System.out.println(columnType);
 			String length = "";
-			if (!columnType.toUpperCase().equals("DATE")) {
+			if (!columnType.toUpperCase().equals("DATE") && !columnType.toUpperCase().equals("DOUBLE")
+					&& !columnType.toUpperCase().equals("DATETIME")&&!columnType.toUpperCase().equals("TEXT")) {
 				columnType = columnType.split("\\(")[1];
 				length = columnType.substring(0, columnType.length() - 1);
 			}
+			
 
 			// String length = columnType.substring(0, columnType.length() - 1);
 			boolean isNull = false;
@@ -181,17 +231,40 @@ public class TableUtil {
 		return resultsMap;
 	}
 
-	protected Map<String, String> UpdateTable(String operationType, String data, String tableName, String dbName) {
+	protected Map<String, String> UpdateTable(String operationType, String data, String tableName, String dbName,JdbcTemplate sql) {
 
 		JsonParser jsonParser = new JsonParser();
+		JsonObject jObj = (JsonObject) jsonParser.parse(data);
 		tableName = dbName + "." + tableName.trim();
+		JsonObject tableChangeJson = (JsonObject) jObj.get("tableChangeData");
+		Gson gson1 = new GsonBuilder().create();
+		TableChangeInfo tableChangeInfo = gson1.fromJson(tableChangeJson, TableChangeInfo.class);
+		String tableDescription = tableChangeInfo.getTableNewDescription();
+		String newTableName = tableChangeInfo.getTableNewName();
+		String tableOldName = tableChangeInfo.getTableOldName();
+		//check whether table name or table table description changed or not
+		
+	     if(tableDescription!=null)
+		 {
+	    	logger.info("valu:"+tableDescription);
+			String query = "ALTER TABLE "+tableName+" COMMENT '"+tableDescription+"'";
+			sql.execute(query);
+		 }
+	     else if(newTableName!=null)
+	     {
+	    	 tableOldName = dbName+"."+tableOldName;
+	    	 String tableNewName =  dbName+"."+newTableName;
+	    	 logger.info("Table Name going to  change  with  the :"+newTableName);
+			 String query = "RENAME TABLE  "+tableOldName+" TO  "+tableNewName+"";
+			 sql.execute(query);
+	     }
 		String query = "";
 		Map<String, String> mapResult = null;
 		switch (operationType.toUpperCase()) {
 
 		case "FIELDCREATION": {
 
-			JsonObject jObj = (JsonObject) jsonParser.parse(data);
+			
 			JsonArray ele = (JsonArray) jObj.get("fields");
 
 			Fields[] arrName = new Gson().fromJson(ele, Fields[].class);
@@ -227,7 +300,7 @@ public class TableUtil {
 		}
 		case "FIELDSDROP": {
 
-			JsonObject jObj = (JsonObject) jsonParser.parse(data);
+			
 			JsonArray ele = (JsonArray) jObj.get("fields");
 			String[] arrName = new Gson().fromJson(ele, String[].class);
 			StringBuffer buffer = new StringBuffer();
@@ -252,16 +325,16 @@ public class TableUtil {
 		}
 		case "FIELDSMODIFY": {
 
-			JsonObject jObj = (JsonObject) jsonParser.parse(data);
+			//JsonObject jObj = (JsonObject) jsonParser.parse(data);
 			JsonArray jarray = (JsonArray) jObj.get("FieldsChanged");
 			FieldsModified[] fieldsModifiedList = new GsonBuilder().create().fromJson(jarray, FieldsModified[].class);
-			List<String> listOfQueries = fieldsModifiedCheck(fieldsModifiedList,tableName,dbName);
+			List<String> listOfQueries = fieldsModifiedCheck(fieldsModifiedList, tableName, dbName,sql);
 			String queries = new GsonBuilder().create().toJson(listOfQueries);
-			
+
 			mapResult = new HashMap<>();
-			mapResult.put("Query",queries);
-			mapResult.put("Indexes","[]");
-			
+			mapResult.put("Query", queries);
+			mapResult.put("Indexes", "[]");
+
 			break;
 		}
 		default:
@@ -270,108 +343,169 @@ public class TableUtil {
 		return mapResult;
 	}
 
-	private List<String> fieldsModifiedCheck(FieldsModified[] fieldsModifiedList, String tableName, String dbName) {
-		//String tableName = dbName + "." + tablename;
+	private List<String> fieldsModifiedCheck(FieldsModified[] fieldsModifiedList, String tableName, String dbName,JdbcTemplate sql) {
+		// String tableName = dbName + "." + tablename;
 		List<String> queryList = new ArrayList<>();
 
 		Arrays.stream(fieldsModifiedList).forEach(fieldmodfiedObj -> {
 			String query = "";
 			String fieldType = fieldmodfiedObj.getFieldType();
 			Fields fieldsList = fieldmodfiedObj.getNewFieldRecord();
+			String fieldLength = fieldsList.getLength()!=null? fieldsList.getLength():"";
 			switch (fieldType.toUpperCase()) {
 			case "FIELDNAME": {
-				String newFieldName = fieldmodfiedObj.getNewField();
-				String oldFieldName = fieldmodfiedObj.getOldField();
-				if (!fieldsList.getLength().equals("0")) {
-					query = "ALTER TABLE " + tableName + " change " + oldFieldName + " " + fieldsList.getFieldName()
-							+ " " + fieldsList.getType() + "(" + fieldsList.getLength() + ")";
-				} else {
-					query = "ALTER TABLE " + tableName + " change " + oldFieldName + " " + fieldsList.getFieldName()
-							+ " " + fieldsList.getType();
+				
+				String newFieldName = fieldmodfiedObj.getNewField()!=null?fieldmodfiedObj.getNewField():"";
+				String oldFieldName = fieldmodfiedObj.getOldField()!=null?fieldmodfiedObj.getOldField():"";
+				if(newFieldName.length()!=0&&newFieldName!=null&&!newFieldName.equals(""))
+				{
+				if(fieldLength.equals("0")||fieldLength.equals(""))
+				{
+					 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(fieldsList.getType().toUpperCase()))
+					 {
+						 query = "ALTER TABLE " + tableName + " change " + oldFieldName + " " + fieldsList.getFieldName()
+			              + " " + fieldsList.getType();
+					 }
+					 else
+						 throw new DataTypeLengthFormatException(fieldsList.getType().toUpperCase(),"Length sholud not zero for the type "+ fieldsList.getType().toUpperCase());
 				}
+				else{
+					 query = "ALTER TABLE " + tableName + " change " + oldFieldName + " " + fieldsList.getFieldName()
+						+ " " + fieldsList.getType() + "(" + fieldsList.getLength() + ")";
+				}
+				}
+				else
+					logger.error("new field sholud not zero for the type " + fieldsList.getType().toUpperCase());//through exception
+				
 				queryList.add(query);
 				break;
 			}
 
 			case "TYPE": {
+				
 				String newFieldName = fieldmodfiedObj.getNewField();
 				String oldFieldName = fieldmodfiedObj.getOldField();
-				if (!fieldsList.getLength().equals("0")) {
+				
+				if(fieldLength.equals("0")||fieldLength.equals(""))
+				{
+					 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(fieldsList.getType().toUpperCase()))
+					 {
+							query = "ALTER TABLE " + tableName + " modify " + fieldsList.getFieldName() + " "
+									+ fieldsList.getType();
+					 }
+					 else
+					 {
+						 logger.error("Length sholud not zero for the type " + fieldsList.getType().toUpperCase());
+						 throw new DataTypeLengthFormatException(fieldsList.getType().toUpperCase(),"Length sholud not zero for the type "+ fieldsList.getType().toUpperCase());
+					 }
+				}
+				else{
+					
 					query = "ALTER TABLE " + tableName + " modify " + fieldsList.getFieldName() + "  "
 							+ fieldsList.getType() + "(" + fieldsList.getLength() + ")";
-				} else {
-					query = "ALTER TABLE " + tableName + " modify " + fieldsList.getFieldName() + " "
-							+ fieldsList.getType();
 				}
+				
 				queryList.add(query);
 				break;
 
 			}
 
 			case "LENGTH":
-				if (!fieldsList.getLength().equals("0")) {
+				
+			{
+				
+				if(fieldLength.equals("0")||fieldLength.equals(""))
+				{
+					 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(fieldsList.getType().toUpperCase()))
+					 {
+						 query = "ALTER TABLE " + tableName + " modify " + fieldsList.getFieldName() + "  "
+									+ fieldsList.getType();
+					 }
+					 else
+					 {
+						 logger.error("Length sholud not zero for the type " + fieldsList.getType().toUpperCase());
+						 throw new DataTypeLengthFormatException(fieldsList.getType().toUpperCase(),"Length sholud not zero for the type "+ fieldsList.getType().toUpperCase());
+
+					 }
+				}
+				else{
+					if(!Arrays.asList(DataTypeUtil.LENGTH_NOT_REQUIRED_TYPES).contains(fieldsList.getType().toUpperCase()))
 					query = "ALTER TABLE " + tableName + " modify " + fieldsList.getFieldName() + "  "
 							+ fieldsList.getType() + "(" + fieldsList.getLength() + ")";
-				} else {
-					query = "ALTER TABLE " + tableName + " modify " + fieldsList.getFieldName() + " "
-							+ fieldsList.getType();
+					else{
+						throw new DataTypeLengthFormatException(fieldType, "The Field Type "+fieldType+" Don't require the Length!!");
+					}
 				}
-				queryList.add(query);
+			
+                queryList.add(query);
 				break;
+			}
 			case "COLLATION":
-
+                  
 				break;
 			case "NULL":
-				if (!fieldsList.getLength().equals("0")) {
+				if (!fieldsList.getLength().equals("0")&&fieldsList.getLength().length()!=0) {
 					if (fieldsList.getNull()) {
 						query = "ALTER TABLE " + tableName + " MODIFY " + fieldsList.getFieldName() + " "
 								+ fieldsList.getType() + "(" + fieldsList.getLength() + ")" + " NOT NULL";
+						queryList.add(query);
 					} else {
 						query = "ALTER TABLE " + tableName + " MODIFY " + fieldsList.getFieldName() + " "
 								+ fieldsList.getType() + "(" + fieldsList.getLength() + ")" + " NULL";
+						queryList.add(query);
 					}
 
 				} else {
 					if (fieldsList.getNull()) {
 						query = "ALTER TABLE " + tableName + " MODIFY " + fieldsList.getFieldName() + " "
 								+ fieldsList.getType() + " NOT NULL";
+						queryList.add(query);
 					} else {
 						query = "ALTER TABLE " + tableName + " MODIFY " + fieldsList.getFieldName() + " "
 								+ fieldsList.getType() + " NULL";
+						queryList.add(query);
 					}
 				}
-				queryList.add(query);
+				
 				break;
 			case "INDEX":
-				
-				 String newIndexField = fieldmodfiedObj.getNewField();
-				 String oldindexField = fieldmodfiedObj.getOldField();
-				 if(oldindexField.equals("")||oldindexField.equals(null))
-				 {
-					 if(newIndexField.toUpperCase().equals("UNIQUE"))
+			{
+				ConstraintsAddDropUtil addOrDrop = new ConstraintsAddDropUtil();
+				String newIndexField = fieldmodfiedObj.getNewField();
+				String oldindexField = fieldmodfiedObj.getOldField();
+				if (oldindexField==null||oldindexField.equals("")) {
+					query = addOrDrop.ConstructQueryToADD(tableName, newIndexField, oldindexField, fieldsList);
+					 if(query.length()!=0||!query.equals(""))
 					 {
-						 //create unique field
-						 query = "ALTER TABLE "+tableName+ " ADD UNIQUE("+fieldsList.getFieldName()+")";
 						 queryList.add(query);
 					 }
-					 else if(newIndexField.toUpperCase().equals("INDEX"))
+				}
+				else if(newIndexField.equals("")||newIndexField.equals(null)){//drop indexes
+					 query = addOrDrop.ConstructQueryToDrop(tableName, newIndexField, oldindexField, fieldsList, sql);
+					 if(query.length()!=0||!query.equals(""))
 					 {
-						 //create index
-						 query = "CREATE INDEX "+fieldsList.getFieldName()+"_index  ON "+tableName+" ("+fieldsList.getFieldName()+")";
-						 
+						 queryList.add(query);
 					 }
-					 else if(newIndexField.toUpperCase().equals("PRIMARY"))
-					 {
-						 //create primary
-						 
-					 }
-					 else{
-						 //create foriagnkey
-					 }
-				 }
-				 
-				 
+				}
+				else if(Arrays.asList(Constraints.CONSTRAINTS).contains(oldindexField.toUpperCase()))
+				{
+					if(newIndexField!=null&&!newIndexField.equals(""))
+					{
+						 query = addOrDrop.ConstructQueryToDrop(tableName, newIndexField, oldindexField, fieldsList, sql);
+						 if(query.length()!=0||!query.equals(""))
+						 {
+							 queryList.add(query);
+						 }
+						 String addQuery = addOrDrop.ConstructQueryToADD(tableName, newIndexField, oldindexField, fieldsList);
+						 if(query.length()!=0||!query.equals(""))
+						 {
+							 queryList.add(addQuery);
+						 }
+					}
+				}
+              
 				break;
+			}
 			case "FIELDDESCRIPTION":
 				if (!fieldsList.getLength().equals("0"))
 					query = "ALTER TABLE " + tableName + " MODIFY" + " " + fieldsList.getFieldName() + " "
@@ -403,85 +537,174 @@ public class TableUtil {
 			String columnName = field.getFieldName();
 			String columnDescription = field.getFieldDescription();
 			String columnType = field.getType();
-			String columnLength = field.getLength();
+			String columnLength = field.getLength()!=null? field.getLength():"";
 			String collation = field.getCollation();
 			boolean isNull = field.getNull();
 			String nullField = isNull ? "NULL" : "NOT NULL";
 			String index = field.getIndex().toUpperCase().trim();
 
-			if (!index.equals("") && !index.equals(null) && !index.equals("INDEX")) {
+			if (!index.equals("") && index!=null && !index.equals("INDEX")) {
 				if (collation.equals("") || collation.equals(null)) {
 					if (index.equals("UNIQUE")) {
-						if (columnType.toUpperCase().equals("DATE")) {
-							String partilaQuery = columnName + " " + columnType + "  " + nullField + " " + index
-									+ " COMMENT " + "'" + columnDescription + "'";
-							buffer.append(partilaQuery + " ,");
-						} else {
-							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ")  " + nullField
-									+ " " + index + " COMMENT " + "'" + columnDescription + "'";
+						
+						if(columnLength.equals("") || columnLength.equals("0"))
+						{
+							 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
+							 {
+								  String partilaQuery = columnName + " " + columnType + "  " + nullField + " " + index
+											+ " COMMENT " + "'" + columnDescription + "'";
+									    buffer.append(partilaQuery + " ,");
+							 }
+							 else
+							 {
+								 logger.error("Length sholud not zero for the type " + columnType.toUpperCase());
+								 throw new DataTypeLengthFormatException(columnType,"Length sholud not zero for the type "+ columnType.toUpperCase());
+							 }
+						}
+						else{
+							   String partilaQuery = columnName + " " + columnType + "(" + columnLength + ")  "
+									+ nullField + " " + index + " COMMENT " + "'" + columnDescription + "'";
 							buffer.append(partilaQuery + " ,");
 						}
+						
+						
+					} // end of unique field check
+					else if (index.equals("PRIMARY")) {
+						
+						if(columnLength.equals("") || columnLength.equals("0"))
+						{
+							 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
+							 {
+								 String partilaQuery = columnName + " " + columnType + "  " + nullField + " COMMENT " + "'"
+											+ columnDescription + "' ";
+									buffer.append(partilaQuery + " ,");
+									primarykey.set(columnName);
+						     }
+							 else
+							 {
+								 logger.error("Length sholud not zero for the type " + columnType.toUpperCase());
+								 throw new DataTypeLengthFormatException(columnType,"Length sholud not zero for the type "+ columnType.toUpperCase());
+							 }
+						}
+						else{
+							
+							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ")  "
+									+ nullField + " COMMENT " + "'" + columnDescription + "' ";
+							buffer.append(partilaQuery + " ,");
+							primarykey.set(columnName);
+						}
+						
+						
+
+					}
+				} // end of collation null check  condition
+				else {
+					if (index.equals("UNIQUE")) {
+						
+						if(columnLength.equals("") || columnLength.equals("0"))
+						{
+							 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
+							 {
+								 String partilaQuery = columnName + " " + columnType + "  COLLATE " + collation + " "
+											+ nullField + " " + index + " COMMENT " + "'" + columnDescription + "'";
+									   buffer.append(partilaQuery + ",");
+							 }
+							 else
+							 {
+								 logger.error("Length sholud not zero for the type " + columnType.toUpperCase());
+								 throw new DataTypeLengthFormatException(columnType,"Length sholud not zero for the type "+ columnType.toUpperCase());
+							 }
+
+						}
+						else{
+							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") COLLATE "
+									+ collation + " " + nullField + " " + index + " COMMENT " + "'"
+									+ columnDescription + "'";
+							buffer.append(partilaQuery + ",");
+						}
+					
+
+					
 
 					} else if (index.equals("PRIMARY")) {
-						if (columnType.toUpperCase().equals("DATE")) {
-							String partilaQuery = columnName + " " + columnType + "  " + nullField + " COMMENT " + "'"
-									+ columnDescription + "' ";
-							buffer.append(partilaQuery + " ,");
-							primarykey.set(columnName);
-						} else {
-							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ")  " + nullField
-									+ " COMMENT " + "'" + columnDescription + "' ";
-							buffer.append(partilaQuery + " ,");
-							primarykey.set(columnName);
+						
+						
+						if(columnLength.equals("") || columnLength.equals("0"))
+						{
+							 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
+							 {
+								 String partilaQuery = columnName + " " + columnType + "  COLLATE " + collation + " "
+											+ nullField + " COMMENT " + "'" + columnDescription + "'";
+									buffer.append(partilaQuery + ",");
+									primarykey.set(columnName);
+							 }
+							 else
+							 {
+								 logger.error("Length sholud not zero for the type " + columnType.toUpperCase());
+								 throw new DataTypeLengthFormatException(columnType,"Length sholud not zero for the type "+ columnType.toUpperCase());
+							 }
+
 						}
-					}
-				} else {
-					if (index.equals("UNIQUE")) {
-						if (columnType.toUpperCase().equals("DATE")) {
-							String partilaQuery = columnName + " " + columnType + "  COLLATE " + collation + " "
-									+ nullField + " " + index + " COMMENT " + "'" + columnDescription + "'";
-							buffer.append(partilaQuery + ",");
-						} else {
-							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") COLLATE "
-									+ collation + " " + nullField + " " + index + " COMMENT " + "'" + columnDescription
-									+ "'";
-							buffer.append(partilaQuery + ",");
-						}
-					} else if (index.equals("PRIMARY")) {
-						if (columnType.toUpperCase().equals("DATE")) {
-							String partilaQuery = columnName + " " + columnType + "  COLLATE " + collation + " "
-									+ nullField + " COMMENT " + "'" + columnDescription + "'";
-							buffer.append(partilaQuery + ",");
-						} else {
+						else{
 							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") COLLATE "
 									+ collation + " " + nullField + " COMMENT " + "'" + columnDescription + "'";
 							buffer.append(partilaQuery + ",");
+							primarykey.set(columnName);
 						}
+
 					}
 				}
 
-			} else {
+			} // end of index field check INDEX not
+			else {
 				if (collation.equals("") || collation.equals(null)) {
-					if (columnType.toUpperCase().equals("DATE")) {
-						String partilaQuery = columnName + " " + columnType + " " + nullField + " COMMENT " + "'"
-								+ columnDescription + "'";
-						buffer.append(partilaQuery + ",");
-					} else {
+					
+					
+					if(columnLength.equals("") || columnLength.equals("0"))
+					{
+						 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
+						 {
+							 String partilaQuery = columnName + " " + columnType + " " + nullField + " COMMENT " + "'"
+										+ columnDescription + "'";
+								    buffer.append(partilaQuery + ",");
+						 }
+						 else
+						 {
+							 logger.error("Length sholud not zero for the type " + columnType.toUpperCase());
+							 throw new DataTypeLengthFormatException(columnType,"Length sholud not zero for the type "+ columnType.toUpperCase());
+						 }
+
+					}
+					else{
 						String partilaQuery = columnName + " " + columnType + "(" + columnLength + ")  " + nullField
 								+ " COMMENT " + "'" + columnDescription + "'";
 						buffer.append(partilaQuery + ",");
 					}
+					
 
 				} else {
-					if (columnType.toUpperCase().equals("DATE")) {
-						String partilaQuery = columnName + " " + columnType + "  COLLATE '" + collation + "'  "
-								+ nullField + " COMMENT " + "'" + columnDescription + "'";
-						buffer.append(partilaQuery + ",");
-					} else {
+					
+					if(columnLength.equals("") || columnLength.equals("0"))
+					{
+						 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
+						 {
+							 String partilaQuery = columnName + " " + columnType + "  COLLATE '" + collation + "'  "
+										+ nullField + " COMMENT " + "'" + columnDescription + "'";
+								buffer.append(partilaQuery + ",");
+						 }
+						 else
+						 {
+							 logger.error("Length sholud not zero for the type " + columnType.toUpperCase());
+						     throw new DataTypeLengthFormatException(columnType,"Length sholud not zero for the type "+ columnType.toUpperCase());
+						 }
+
+					}
+					else{
 						String partilaQuery = columnName + " " + columnType + "(" + columnLength + ")  COLLATE '"
 								+ collation + "'  " + nullField + " COMMENT " + "'" + columnDescription + "'";
 						buffer.append(partilaQuery + ",");
 					}
+
 				}
 				if (index.equals("INDEX")) {
 					indexes.add(columnName);

@@ -8,16 +8,18 @@ import org.springframework.jdbc.support.rowset.SqlRowSet;
 import org.springframework.web.bind.annotation.CrossOrigin;
 
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.biz.configuration.ConnectionProperty;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 
-@CrossOrigin(origins = "http://localhost:4201")
+@CrossOrigin(origins = "http://106.51.126.111:4201")
 @RestController
 public class HomeController {
 
@@ -27,55 +29,45 @@ public class HomeController {
 
 	@Autowired
 	TableUtil util;
+	 
+	@Autowired
+	 ConnectionProperty connProp;
+	 
+	@CrossOrigin(origins = "http://106.51.126.111:4201")
+	 @RequestMapping(value = "/login", method = RequestMethod.GET)
+	 public Map<String, String> login(@RequestParam(value = "username") String username,
+	   @RequestParam(value = "password") String password,@RequestParam(value = "domainName") String domainName) {
+	  
+	  Map<String, String> domainUserTableName = util.getDatabaseAndUserTableName(domainName,sql, connProp);
+	  
+	  if(domainUserTableName.isEmpty())
+	   return null;
+	  else {
+	   Map<String, String> userData = util.checkUserExists(username, password, domainUserTableName, sql);
+	   
+	   return userData ;
+	  }
+	 }
 
 	
-	@CrossOrigin(origins = "http://localhost:4201")
-	@RequestMapping(value = "/read1", method = RequestMethod.GET)
-	public String checkUserExists(@RequestParam(value = "userName") String userName,@RequestParam(value = "ApiKey") String ApiKey) {
-		// String dbName = "springbootdb";
-		String dbName = "mastercompanies";
-		String tableName = "T100";
-		String tableSpace="";
-		String userMaster="";
-		String columnInfoQuery = "SELECT TABLESPACE,USERMASTER FROM "+ dbName+"."+tableName +"  WHERE APIKEY = "+ApiKey;
-		SqlRowSet rowSet = sql.queryForRowSet(columnInfoQuery);
-		int num = rowSet.getRow();
-		while(rowSet.next())
-		{
-			
-			 tableSpace = rowSet.getNString("TABLESPACE");
-			 userMaster = rowSet.getString("USERMASTER");
-			 
-			 
-		}
-	//	String result = this.util.DisplayTableInfo(rowSet, tableRowset, tableName);
 
-		/*
-		 * Gson gson = new Gson(); return
-		 * gson.toJson(this.util.getEntitiesFromResultSet(rowSet));
-		 */
-		return null;
-
-	}
 	
-	
-	
-	
-	@CrossOrigin(origins = "http://localhost:4201")
+	@CrossOrigin(origins = "http://106.51.126.111:4201")
 	@RequestMapping(value = "/list", method = RequestMethod.GET)
-	public String getTableList() {
-		// String dbName = "springbootdb";
-		String dbName = "muleesb";
-		SqlRowSet rowSet = sql.queryForRowSet("select * from information_schema.tables where TABLE_SCHEMA='muleesb'");
+	public String getTableList(@RequestHeader(value="domainName") String domainName) {
+
+		String dbName = util.getDatabaseName(domainName, sql, connProp);
+		SqlRowSet rowSet = sql.queryForRowSet("select * from information_schema.tables where TABLE_SCHEMA='"+dbName+"'");
 		String resultAsJsonString = this.util.getTableDefinition(rowSet);
 		return resultAsJsonString;
 	}
 
-	@CrossOrigin(origins = "http://localhost:4201")
+	@CrossOrigin(origins = "http://106.51.126.111:4201")
 	@RequestMapping(value = "/create", method = RequestMethod.POST)
-	public String createTable(@RequestBody String tableInfo) {
+	public String createTable(@RequestHeader(value="domainName") String domainName, @RequestBody String tableInfo) {
+		String dbName = util.getDatabaseName(domainName, sql, connProp);
 
-		Map<String, String> mapResult = this.util.creatTable(tableInfo);
+		Map<String, String> mapResult = this.util.creatTable(tableInfo,dbName);
 		String query = mapResult.get("Query");
 		String indexeColumnArrayString = mapResult.get("indexes");
 		JsonParser parser = new JsonParser();
@@ -90,11 +82,10 @@ public class HomeController {
 
 	}
 
-	@CrossOrigin(origins = "http://localhost:4201")
+	@CrossOrigin(origins = "http://106.51.126.111:4201")
 	@RequestMapping(value = "/read", method = RequestMethod.GET)
-	public String readTableInfo(@RequestParam(value = "tableName") String tableName) {
-		// String dbName = "springbootdb";
-		String dbName = "muleesb";
+	public String readTableInfo(@RequestHeader(value="domainName") String domainName, @RequestParam(value = "tableName") String tableName) {
+		String dbName = util.getDatabaseName(domainName, sql, connProp);
 		String columnInfoQuery = "SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME ='" + tableName
 				+ "' and TABLE_SCHEMA = '" + dbName + "'";
 		SqlRowSet rowSet = sql.queryForRowSet(columnInfoQuery);
@@ -111,15 +102,14 @@ public class HomeController {
 
 	}
 
-	@CrossOrigin(origins = "http://localhost:4201")
+	@CrossOrigin(origins = "http://106.51.126.111:4201")
 	@RequestMapping(value = "/update", method = RequestMethod.POST)
-	public String updateTable(@RequestParam(value = "tableName") String tableName,
+	public String updateTable(@RequestHeader(value="domainName") String domainName, @RequestParam(value = "tableName") String tableName,
 			@RequestParam(value = "operationType") String operationType, @RequestBody String data) {
-		// String dbName = "springbootdb";
-		String dbName = "muleesb";
+		String dbName = util.getDatabaseName(domainName, sql, connProp);
 		JsonParser parser = new JsonParser();
-		
-			Map<String, String> mapResult = this.util.UpdateTable(operationType, data, tableName, dbName);
+		String result = "Table Updated Succesfully!!!";
+			Map<String, String> mapResult = this.util.UpdateTable(operationType, data, tableName, dbName,sql);
 			if (!operationType.equals("FIELDSMODIFY")) {
 			String query = mapResult.get("Query");
 			sql.execute(query);
@@ -145,14 +135,13 @@ public class HomeController {
 				
 			}
 
-		return "Table Updated Succesfully!!!";
+		return result;
 	}
 
-	@CrossOrigin(origins = "http://localhost:4201")
+	@CrossOrigin(origins = "http://106.51.126.111:4201")
 	@RequestMapping(value = "/delete", method = RequestMethod.DELETE)
-	public String deleteTable(@RequestParam(value = "tableName") String tableName) {
-
-		String dbName = "muleesb";
+	public String deleteTable(@RequestHeader(value="domainName") String domainName, @RequestParam(value = "tableName") String tableName) {
+		String dbName = util.getDatabaseName(domainName, sql, connProp);
 		String query = "drop table if exists " + dbName + "." + tableName;
 		sql.execute(query);
 

@@ -1,4 +1,4 @@
-package com.biz.demo;
+package com.biz.model;
 
 public class TableData {
 	private String TableName;
