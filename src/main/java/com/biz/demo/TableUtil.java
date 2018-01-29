@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.sql.DataSource;
 
+
 import org.apache.log4j.Logger;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
@@ -138,8 +139,12 @@ public class TableUtil {
 			String columnType = rowset.getString("COLUMN_TYPE");
 			System.out.println(columnType);
 			String length = "";
-			if (!columnType.toUpperCase().equals("DATE") && !columnType.toUpperCase().equals("DOUBLE")
+			/*if (!columnType.toUpperCase().equals("DATE") && !columnType.toUpperCase().equals("DOUBLE")
 					&& !columnType.toUpperCase().equals("DATETIME")&&!columnType.toUpperCase().equals("TEXT")) {
+				columnType = columnType.split("\\(")[1];
+				length = columnType.substring(0, columnType.length() - 1);
+			}*/
+			if (columnType.toUpperCase().contains("(")) {
 				columnType = columnType.split("\\(")[1];
 				length = columnType.substring(0, columnType.length() - 1);
 			}
@@ -538,7 +543,16 @@ public class TableUtil {
 			String columnDescription = field.getFieldDescription();
 			String columnType = field.getType();
 			String columnLength = field.getLength()!=null? field.getLength():"";
-			String collation = field.getCollation();
+			String collationWithType = field.getCollation();
+			String charecterSet = "";
+			String collation = "";
+			if(collationWithType.length()!=0&&collationWithType!=null)
+			{
+			  String []collationArray = collationWithType.split("-");
+			  charecterSet = collationArray[0].trim();
+			  collation = collationArray[1].trim();
+			}
+					
 			boolean isNull = field.getNull();
 			String nullField = isNull ? "NULL" : "NOT NULL";
 			String index = field.getIndex().toUpperCase().trim();
@@ -605,7 +619,7 @@ public class TableUtil {
 						{
 							 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
 							 {
-								 String partilaQuery = columnName + " " + columnType + "  COLLATE " + collation + " "
+								 String partilaQuery = columnName + " " + columnType + " CHARACTER SET "+charecterSet+" COLLATE " + collation + " "
 											+ nullField + " " + index + " COMMENT " + "'" + columnDescription + "'";
 									   buffer.append(partilaQuery + ",");
 							 }
@@ -617,7 +631,7 @@ public class TableUtil {
 
 						}
 						else{
-							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") COLLATE "
+							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") CHARACTER SET "+charecterSet+" COLLATE "
 									+ collation + " " + nullField + " " + index + " COMMENT " + "'"
 									+ columnDescription + "'";
 							buffer.append(partilaQuery + ",");
@@ -633,7 +647,7 @@ public class TableUtil {
 						{
 							 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
 							 {
-								 String partilaQuery = columnName + " " + columnType + "  COLLATE " + collation + " "
+								 String partilaQuery = columnName + " " + columnType + " CHARACTER SET "+charecterSet+"  COLLATE " + collation + " "
 											+ nullField + " COMMENT " + "'" + columnDescription + "'";
 									buffer.append(partilaQuery + ",");
 									primarykey.set(columnName);
@@ -646,7 +660,7 @@ public class TableUtil {
 
 						}
 						else{
-							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") COLLATE "
+							String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") CHARACTER SET "+charecterSet+" COLLATE "
 									+ collation + " " + nullField + " COMMENT " + "'" + columnDescription + "'";
 							buffer.append(partilaQuery + ",");
 							primarykey.set(columnName);
@@ -657,7 +671,7 @@ public class TableUtil {
 
 			} // end of index field check INDEX not
 			else {
-				if (collation.equals("") || collation.equals(null)) {
+				if (collation.equals("") || collation==null) {
 					
 					
 					if(columnLength.equals("") || columnLength.equals("0"))
@@ -688,7 +702,7 @@ public class TableUtil {
 					{
 						 if(Arrays.asList(DataTypeUtil.OPTIONAL_LENGTH).contains(columnType.toUpperCase()))
 						 {
-							 String partilaQuery = columnName + " " + columnType + "  COLLATE '" + collation + "'  "
+							 String partilaQuery = columnName + " " + columnType + " CHARACTER SET "+charecterSet+"  COLLATE '" + collation + "'  "
 										+ nullField + " COMMENT " + "'" + columnDescription + "'";
 								buffer.append(partilaQuery + ",");
 						 }
@@ -700,7 +714,7 @@ public class TableUtil {
 
 					}
 					else{
-						String partilaQuery = columnName + " " + columnType + "(" + columnLength + ")  COLLATE '"
+						String partilaQuery = columnName + " " + columnType + "(" + columnLength + ") CHARACTER SET "+charecterSet+"  COLLATE '"
 								+ collation + "'  " + nullField + " COMMENT " + "'" + columnDescription + "'";
 						buffer.append(partilaQuery + ",");
 					}

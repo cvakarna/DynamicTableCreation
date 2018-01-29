@@ -19,7 +19,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 
-@CrossOrigin(origins = "http://106.51.126.111:4201")
+@CrossOrigin(origins = "http://localhost:4203")
 @RestController
 public class HomeController {
 
@@ -33,7 +33,8 @@ public class HomeController {
 	@Autowired
 	 ConnectionProperty connProp;
 	 
-	@CrossOrigin(origins = "http://106.51.126.111:4201")
+	//@CrossOrigin(origins = "http://106.51.126.111:4201")
+	@CrossOrigin(origins = "http://localhost:4203")
 	 @RequestMapping(value = "/login", method = RequestMethod.GET)
 	 public Map<String, String> login(@RequestParam(value = "username") String username,
 	   @RequestParam(value = "password") String password,@RequestParam(value = "domainName") String domainName) {
@@ -52,7 +53,7 @@ public class HomeController {
 	
 
 	
-	@CrossOrigin(origins = "http://106.51.126.111:4201")
+	@CrossOrigin(origins = "http://localhost:4203")
 	@RequestMapping(value = "/list", method = RequestMethod.GET)
 	public String getTableList(@RequestHeader(value="domainName") String domainName) {
 
@@ -62,7 +63,7 @@ public class HomeController {
 		return resultAsJsonString;
 	}
 
-	@CrossOrigin(origins = "http://106.51.126.111:4201")
+	@CrossOrigin(origins = "http://localhost:4203")
 	@RequestMapping(value = "/create", method = RequestMethod.POST)
 	public String createTable(@RequestHeader(value="domainName") String domainName, @RequestBody String tableInfo) {
 		String dbName = util.getDatabaseName(domainName, sql, connProp);
@@ -82,7 +83,7 @@ public class HomeController {
 
 	}
 
-	@CrossOrigin(origins = "http://106.51.126.111:4201")
+	@CrossOrigin(origins = "http://localhost:4203")
 	@RequestMapping(value = "/read", method = RequestMethod.GET)
 	public String readTableInfo(@RequestHeader(value="domainName") String domainName, @RequestParam(value = "tableName") String tableName) {
 		String dbName = util.getDatabaseName(domainName, sql, connProp);
@@ -102,7 +103,7 @@ public class HomeController {
 
 	}
 
-	@CrossOrigin(origins = "http://106.51.126.111:4201")
+	@CrossOrigin(origins = "http://localhost:4203")
 	@RequestMapping(value = "/update", method = RequestMethod.POST)
 	public String updateTable(@RequestHeader(value="domainName") String domainName, @RequestParam(value = "tableName") String tableName,
 			@RequestParam(value = "operationType") String operationType, @RequestBody String data) {
@@ -138,7 +139,7 @@ public class HomeController {
 		return result;
 	}
 
-	@CrossOrigin(origins = "http://106.51.126.111:4201")
+	@CrossOrigin(origins = "http://localhost:4203")
 	@RequestMapping(value = "/delete", method = RequestMethod.DELETE)
 	public String deleteTable(@RequestHeader(value="domainName") String domainName, @RequestParam(value = "tableName") String tableName) {
 		String dbName = util.getDatabaseName(domainName, sql, connProp);
