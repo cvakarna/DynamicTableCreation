@@ -58,7 +58,8 @@ public class HomeController {
 	public String getTableList(@RequestHeader(value="domainName") String domainName) {
 
 		String dbName = util.getDatabaseName(domainName, sql, connProp);
-		SqlRowSet rowSet = sql.queryForRowSet("select * from information_schema.tables where TABLE_SCHEMA='"+dbName+"'");
+		SqlRowSet rowSet = sql.queryForRowSet("select * from "+connProp.getMasterDatabaseName()+"."+dbName+"_tableinfo");
+		//SqlRowSet rowSet = sql.queryForRowSet("select * from information_schema.tables where TABLE_SCHEMA='"+dbName+"'");
 		String resultAsJsonString = this.util.getTableDefinition(rowSet);
 		return resultAsJsonString;
 	}
@@ -67,18 +68,20 @@ public class HomeController {
 	@RequestMapping(value = "/create", method = RequestMethod.POST)
 	public String createTable(@RequestHeader(value="domainName") String domainName, @RequestBody String tableInfo) {
 		String dbName = util.getDatabaseName(domainName, sql, connProp);
-
-		Map<String, String> mapResult = this.util.creatTable(tableInfo,dbName);
+        
+		Map<String, String> mapResult = this.util.creatTable(tableInfo,dbName,domainName,sql,connProp);
 		String query = mapResult.get("Query");
 		String indexeColumnArrayString = mapResult.get("indexes");
+		String tableUpdate = mapResult.get("TableUpdate");
 		JsonParser parser = new JsonParser();
 		JsonArray indexesArray = (JsonArray) parser.parse(indexeColumnArrayString);
 		sql.execute(query);
+		
 		for (JsonElement jsonElement : indexesArray) {
 			String indexQuery = jsonElement.getAsString();
 			sql.execute(indexQuery);
 		}
-
+		sql.execute(tableUpdate);
 		return "Table created successfully!!!!";
 
 	}
@@ -110,7 +113,7 @@ public class HomeController {
 		String dbName = util.getDatabaseName(domainName, sql, connProp);
 		JsonParser parser = new JsonParser();
 		String result = "Table Updated Succesfully!!!";
-			Map<String, String> mapResult = this.util.UpdateTable(operationType, data, tableName, dbName,sql);
+			Map<String, String> mapResult = this.util.UpdateTable(operationType, data, tableName, dbName,sql,connProp);
 			if (!operationType.equals("FIELDSMODIFY")) {
 			String query = mapResult.get("Query");
 			sql.execute(query);
@@ -144,7 +147,10 @@ public class HomeController {
 	public String deleteTable(@RequestHeader(value="domainName") String domainName, @RequestParam(value = "tableName") String tableName) {
 		String dbName = util.getDatabaseName(domainName, sql, connProp);
 		String query = "drop table if exists " + dbName + "." + tableName;
+		String queryTableInfo = "delete from  "+connProp.getMasterDatabaseName()+"."+dbName+"_tableInfo where tableName = '"+tableName+"'";
+
 		sql.execute(query);
+		sql.execute(queryTableInfo);
 
 		return "Table Deleted";
 	}

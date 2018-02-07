@@ -1,7 +1,10 @@
 package com.biz.demo;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -12,6 +15,7 @@ import javax.sql.DataSource;
 
 
 import org.apache.log4j.Logger;
+import org.springframework.jdbc.InvalidResultSetAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
 import org.springframework.jdbc.support.rowset.SqlRowSetMetaData;
@@ -83,7 +87,7 @@ public class TableUtil {
 
 	}
 
-	protected Map<String, String> creatTable(String table, String dbName) {
+	protected Map<String, String> creatTable(String table, String dbName,String domainName,JdbcTemplate sql,ConnectionProperty connProp) {
 
 		Gson gson = new Gson();
 		Table t = gson.fromJson(table, Table.class);
@@ -119,9 +123,16 @@ public class TableUtil {
 
 		String query = "CREATE TABLE IF NOT EXISTS " + tableName + "(" + partialQuery + ") COMMENT '" + tableDescription
 				+ "'";
+		//sql.execute(query);
+		//store table info (createdby,createdOn,modifiedBy etc)
+		String queryTable = "insert into "+connProp.getMasterDatabaseName()+"."+dbName+"_tableInfo (tableName,createdBy,createdOn,modifiedBy,modifiedOn,tableComment)  values ('"+tableDetails.getTableName().trim()+"','"+tableDetails.getCreatedBy()+"','"+tableDetails.getCreatedOn()+"','"+tableDetails.getModifiedBy()+"','"+tableDetails.getModifiedOn()+"','"+tableDetails.getTableDescription()+"')";
+		//sql.execute(queryTable);
         logger.info("Table Create Query:"+query);
 		mapResult.put("Query", query);
 		mapResult.put("indexes", indexListAsString);
+		mapResult.put("TableUpdate", queryTable);
+		
+		
 		return mapResult;
 
 	}
@@ -199,15 +210,25 @@ public class TableUtil {
 		Gson mapper = new GsonBuilder().serializeNulls().create();
 		while (rowSet.next()) {
 
-			String createdBy = "";
+		/*	String createdBy = "";
 			String changedby = "";
 			String tableName = rowSet.getString("TABLE_NAME");
 			String tableDescription = rowSet.getString("TABLE_COMMENT");
 			String tableChangedOn = rowSet.getString("UPDATE_TIME");
-			String createdOn = rowSet.getString("CREATE_TIME");
-			TableData data = new TableData(tableName, tableDescription, createdOn, createdBy, tableChangedOn,
-					changedby);
+			String createdOn="";
+			
+		    createdOn = rowSet.getString("CREATE_TIME");*/
+			
+			String tableName = rowSet.getString("tableName");
+			String tableDescription = rowSet.getString("tableComment");
+			String createdBy = rowSet.getString("createdBy");
+			String modifiedBy = rowSet.getString("modifiedBy");
+			String  modifiedOn = rowSet.getString("modifiedOn");
+			String   createdOn = rowSet.getString("createdOn");
+			TableData data = new TableData(tableName, tableDescription, createdOn, createdBy, modifiedOn,
+					modifiedBy);
 			tableList.add(data);
+			
 		}
 		String resultAsJson = mapper.toJson(tableList);
 		// List<Map<String, Object>> objects =
@@ -215,7 +236,7 @@ public class TableUtil {
 
 		return resultAsJson;
 	}
-
+  
 	protected List<Map<String, Object>> getEntitiesFromResultSet(SqlRowSet rowSet) {
 		ArrayList<Map<String, Object>> entities = new ArrayList<>();
 		while (rowSet.next()) {
@@ -236,12 +257,19 @@ public class TableUtil {
 		return resultsMap;
 	}
 
-	protected Map<String, String> UpdateTable(String operationType, String data, String tableName, String dbName,JdbcTemplate sql) {
-
+	protected Map<String, String> UpdateTable(String operationType, String data, String tableName, String dbName,JdbcTemplate sql,ConnectionProperty connProp) {
+         String tblName = tableName;
 		JsonParser jsonParser = new JsonParser();
 		JsonObject jObj = (JsonObject) jsonParser.parse(data);
 		tableName = dbName + "." + tableName.trim();
 		JsonObject tableChangeJson = (JsonObject) jObj.get("tableChangeData");
+		JsonElement jele = jObj.get("modifiedBy");
+		String modifiedBy = jele.getAsString();
+		JsonElement modifiedOnJele = jObj.get("modifiedOn");
+		String modifiedOn = modifiedOnJele.getAsString();
+		//String modifiedOn = jObj.get("modifiedOn")!=null?jObj.get("modifiedOn"):"";
+		//String modifiedBy = jObj.get("modifiedBy")!=null?jObj.get("modifiedBy").toString():"";
+		
 		Gson gson1 = new GsonBuilder().create();
 		TableChangeInfo tableChangeInfo = gson1.fromJson(tableChangeJson, TableChangeInfo.class);
 		String tableDescription = tableChangeInfo.getTableNewDescription();
@@ -345,6 +373,8 @@ public class TableUtil {
 		default:
 			break;
 		}
+		String updateTableInfoquery = "update "+connProp.getMasterDatabaseName()+"."+dbName+"_tableInfo set modifiedOn='"+modifiedOn+"', modifiedBy='"+modifiedBy+"' where tableName = '"+tblName+"'";
+		sql.execute(updateTableInfoquery);
 		return mapResult;
 	}
 
